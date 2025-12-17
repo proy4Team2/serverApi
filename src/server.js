@@ -38,7 +38,7 @@ app.use(errorMiddleware);
 
 const startServer = async () => {
     app.listen(PORT, () => {
-        console.log(`Servidor corriendo --- puerto ${PORT}`);
+        console.log(`Server running --- port ${PORT}`);
     });
 };
 
