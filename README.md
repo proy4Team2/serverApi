@@ -5,7 +5,30 @@ Todas las peticiones a los endpoints de sesiones requieren un **Token de Firebas
 
 * **Header:** `Authorization: <Firebase_ID_Token>`
 
----
+## 6. Registro de Nuevos Usuarios
+
+El servidor permite la creación de una cuenta directamente mediante correo y contraseña, encargándose de la creación en **Firebase Auth** y la persistencia del perfil en **Firestore**.
+
+* **URL:** `/api/auth/register`
+* **Método:** `POST`
+* **Headers:** * `Content-Type: application/json`
+
+Todos los campos son obligatorios para que el registro.
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `email` | String | Correo electrónico válido del usuario. |
+| `password` | String | Contraseña (Mínimo 6 caracteres según reglas de Firebase). |
+| `name` | String | Nombre completo que se mostrará en el perfil. |
+
+**Ejemplo de JSON de entrada:**
+```json
+{
+  "email": "estudiante@ejemplo.com",
+  "password": "miPassword123",
+  "name": "Juan Pérez"
+}
+```
 
 ## 2. Endpoint
 Este endpoint recibe el audio del usuario, genera la transcripción y retorna un análisis detallado.
