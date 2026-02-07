@@ -52,6 +52,7 @@ El servidor retorna un objeto con la transcripción y el feedback estructurado d
     }
   }
 }
+```
 
 ### 3. Lógica de Análisis 
 
