@@ -24,18 +24,19 @@ exports.createSession = async (req, res, next) => {
 
         const language = req.body.language || 'en';
         const audioBuffer = req.file.buffer;
+        console.log(`Received audio buffer: ${audioBuffer.length} bytes`);
 
         const transcriptionData = await deepgramService.transcribeAudio(audioBuffer, language);
-        
+
         const words = deepgramService.extractWords(transcriptionData);
         const pauses = deepgramService.calculatePauses(words);
         const pauseStatistics = deepgramService.getPauseStatistics(pauses);
-        
+
         const technicalMetrics = {
             duration_seconds: transcriptionData.metadata.duration,
             word_count: words.length,
-            wpm: (transcriptionData.metadata.duration > 0) 
-                ? (words.length / (transcriptionData.metadata.duration / 60)).toFixed(1) 
+            wpm: (transcriptionData.metadata.duration > 0)
+                ? (words.length / (transcriptionData.metadata.duration / 60)).toFixed(1)
                 : 0,
             pause_percentage: (transcriptionData.metadata.duration > 0)
                 ? ((pauseStatistics.totalPauseTime / transcriptionData.metadata.duration) * 100).toFixed(1)
@@ -43,14 +44,14 @@ exports.createSession = async (req, res, next) => {
             average_confidence: transcriptionData.confidence.toFixed(2)
         };
 
-        conversationHistory.push({ 
-            role: 'student', 
-            text: transcriptionData.transcript 
+        conversationHistory.push({
+            role: 'student',
+            text: transcriptionData.transcript
         });
 
         const aiAnalysis = await analysisService.analyzeInterview(
-            conversationHistory, 
-            technicalMetrics, 
+            conversationHistory,
+            technicalMetrics,
             language
         );
 
@@ -61,7 +62,7 @@ exports.createSession = async (req, res, next) => {
             createdAt: new Date().toISOString(),
             transcription: {
                 text: transcriptionData.transcript,
-                words: words 
+                words: words
             },
             metrics: technicalMetrics,
             aiAnalysis: aiAnalysis
@@ -74,7 +75,8 @@ exports.createSession = async (req, res, next) => {
             sessionId,
             data: {
                 transcript: transcriptionData.transcript,
-                feedback: aiAnalysis 
+                metrics: technicalMetrics,
+                feedback: aiAnalysis
             }
         });
 
@@ -111,8 +113,8 @@ exports.deleteUserSession = async (req, res, next) => {
 };
 
 exports.getSessionAudio = async (req, res, next) => {
-    res.status(501).json({ 
-        success: false, 
-        error: 'Audio storage functionality is currently disabled.' 
+    res.status(501).json({
+        success: false,
+        error: 'Audio storage functionality is currently disabled.'
     });
 };
