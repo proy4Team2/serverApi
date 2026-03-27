@@ -12,32 +12,25 @@ class DeepgramService {
             : deepgramConfig.defaultParamsEN;
 
         try {
-            const crypto = require('crypto');
-            const hash = crypto.createHash('sha256').update(audioBuffer).digest('hex');
-            console.log(`Audio Buffer SHA256 (Local): ${hash}`);
-
-            // En el SDK v3, para un Buffer se puede pasar directamente el buffer
-            // El segundo argumento son las opciones
             const { result, error } = await this.client.listen.prerecorded.transcribeFile(
-                audioBuffer, 
+                audioBuffer, // Usamos el buffer directamente
                 {
                     model: params.model,
                     language: params.language,
-                    smart_format: true, // Forzamos true para ver si mejora
-                    punctuate: true,
-                    filler_words: true
+                    punctuate: params.punctuate,
+                    filler_words: params.filler_words,
+                    smart_format: params.smart_format,
+                    numerals: params.numerals,
+                    diarize: params.diarize
                 }
             );
-            
+
             if (error) {
-                console.error('Deepgram Error detail:', JSON.stringify(error, null, 2));
-                throw new Error(`Deepgram error: ${error.message || 'Unknown error'}`);
+                throw new Error(`Deepgram error: ${error.message}`);
             }
 
-            console.log('Deepgram Result:', JSON.stringify(result, null, 2));
             return this.parseTranscriptionResponse(result);
         } catch (error) {
-            console.error('Catch block error:', error);
             throw new Error(`Deepgram transcription failed: ${error.message}`);
         }
     }
