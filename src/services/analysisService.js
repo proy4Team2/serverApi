@@ -1,3 +1,4 @@
+// src/services/analysisService.js
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 require('dotenv').config();
 
@@ -10,12 +11,6 @@ class AnalysisService {
         });
     }
 
-    /**
-     * interview analysis
-     * @param {Array} history - historical chat messages.
-     * @param {Object} metrics - technical audio metrics.
-     * @param {string} language - 'es' or 'en' .
-     */
     async analyzeInterview(history, metrics, language = 'es') {
         try {
             const prompt = this._buildPrompt(history, metrics, language);
@@ -46,30 +41,35 @@ class AnalysisService {
         
         INPUT DATA:
         - Language Context: ${feedbackLang}
-        - Audio Metrics: ${JSON.stringify(metrics)}
-        - Transcript:
+        - Student Audio Metrics: ${JSON.stringify(metrics)}
+        - Transcript (Dialog format):
         ${conversationText}
 
         INSTRUCTIONS:
         Analyze the candidate performance assuming TWO DISTINCT EXPERT ROLES.
         
+        *** CRITICAL CONTEXT ***
+        The Transcript contains dialogue separated by roles: "recruiter" (asking questions) and "student" (answering).
+        ONLY evaluate the performance, communication, structure, and answers of the "student". Do not evaluate the recruiter.
+        Use the provided Student Audio Metrics to evaluate pacing (WPM), which has been pre-calculated based ONLY on the student's speaking time.
+
         *** CRITICAL INSTRUCTION ***
-        The CONTENT of your JSON response (summaries, feedback, advice) MUST BE IN ${feedbackLang}.
+        The CONTENT of your JSON response MUST BE IN ${feedbackLang}.
         ****************************
 
         ---
         ROLE 1: PUBLIC SPEAKING COACH
-        Objective: Evaluate delivery, structure, and clarity.
+        Objective: Evaluate delivery, structure, and clarity of the student.
         
         KNOWLEDGE BASE:
         1. **Toulmin Model**: Does the student connect Data -> Warrant -> Claim?
         2. **Cohesion**: Penalize circumlocution. Reward conciseness.
-        3. **Confidence**: Detect hedging ("I think", "maybe") vs. assertive language.
+        3. **Confidence**: Detect hedging vs. assertive language.
         4. **Pacing**: Analyze WPM (${metrics.wpm}). Is it too fast (>160) or too slow (<110)?
 
         ---
         ROLE 2: SENIOR FAANG RECRUITER (${targetRoleLang} context)
-        Objective: Evaluate technical competence and behavioral fit.
+        Objective: Evaluate technical competence and behavioral fit of the student.
         
         KNOWLEDGE BASE:
         1. **STAR Method**: Checks for Situation, Task, Action, Result in behavioral answers.
@@ -77,14 +77,14 @@ class AnalysisService {
         3. **Red Flags**: Inconsistencies, lack of depth, or defensiveness.
 
         ---
-        OUTPUT JSON FORMAT (Response must be valid JSON only):
+        OUTPUT JSON FORMAT:
         {
             "oratory_expert": {
                 "score": number (0-100),
                 "summary": "Executive summary of communication style (${feedbackLang}).",
                 "strengths": ["point 1", "point 2"],
                 "weaknesses": ["point 1", "point 2"],
-                "pacing_feedback": "Specific feedback on pace and pauses (${feedbackLang})."
+                "pacing_feedback": "Specific feedback on pace based on the provided WPM metric (${feedbackLang})."
             },
             "recruiter_verdict": {
                 "passed": boolean,

@@ -1,3 +1,4 @@
+// src/controllers/session.controller.js
 const { v4: uuidv4 } = require('uuid');
 const deepgramService = require('../services/deepgramService');
 const analysisService = require('../services/analysisService');
@@ -9,7 +10,7 @@ exports.createSession = async (req, res, next) => {
 
     try {
         if (!req.file) {
-            return res.status(400).json({ error: 'No audio file provided' });
+            return res.status(400).json({ error: 'No se ha proporcionado ningún archivo de audio' });
         }
 
         let conversationHistory = [];
@@ -18,35 +19,27 @@ exports.createSession = async (req, res, next) => {
                 conversationHistory = JSON.parse(req.body.conversationHistory);
             }
         } catch (e) {
-            console.warn(e);
+            console.warn("No se pudo parsear el historial previo, iniciando limpio.");
             conversationHistory = [];
         }
 
-        const language = req.body.language || 'en';
+        const language = req.body.language || 'es';
         const audioBuffer = req.file.buffer;
 
         const transcriptionData = await deepgramService.transcribeAudio(audioBuffer, language);
         
-        const words = deepgramService.extractWords(transcriptionData);
-        const pauses = deepgramService.calculatePauses(words);
-        const pauseStatistics = deepgramService.getPauseStatistics(pauses);
-        
-        const technicalMetrics = {
-            duration_seconds: transcriptionData.metadata.duration,
-            word_count: words.length,
-            wpm: (transcriptionData.metadata.duration > 0) 
-                ? (words.length / (transcriptionData.metadata.duration / 60)).toFixed(1) 
-                : 0,
-            pause_percentage: (transcriptionData.metadata.duration > 0)
-                ? ((pauseStatistics.totalPauseTime / transcriptionData.metadata.duration) * 100).toFixed(1)
-                : 0,
-            average_confidence: transcriptionData.confidence.toFixed(2)
-        };
+        const chatTurns = deepgramService.extractConversationHistory(transcriptionData.allWords);
+        const playerMetrics = deepgramService.calculateStudentMetrics(transcriptionData.allWords);
 
-        conversationHistory.push({ 
-            role: 'student', 
-            text: transcriptionData.transcript 
-        });
+        conversationHistory = conversationHistory.concat(chatTurns);
+
+        const technicalMetrics = {
+            duration_seconds: transcriptionData.metadata.totalDuration,
+            student_speaking_duration: playerMetrics.speaking_duration_seconds,
+            word_count: playerMetrics.word_count,
+            wpm: playerMetrics.wpm, 
+            average_confidence: Number(transcriptionData.studentConfidence.toFixed(2))
+        };
 
         const aiAnalysis = await analysisService.analyzeInterview(
             conversationHistory, 
@@ -54,31 +47,34 @@ exports.createSession = async (req, res, next) => {
             language
         );
 
-        const completeAnalysis = {
+        const formattedTranscript = chatTurns.map(t => `${t.role.toUpperCase()}: ${t.text}`).join('\n\n');
+
+        const completeData = {
             sessionId,
             userId,
             language,
             createdAt: new Date().toISOString(),
-            transcription: {
-                text: transcriptionData.transcript,
-                words: words 
-            },
             metrics: technicalMetrics,
             aiAnalysis: aiAnalysis
         };
 
-        await firebaseService.saveCompleteAnalysis(sessionId, completeAnalysis);
+        await firebaseService.saveCompleteAnalysis(sessionId, completeData);
 
         res.status(201).json({
             success: true,
             sessionId,
+            message: "Análisis completado y progreso actualizado",
             data: {
-                transcript: transcriptionData.transcript,
-                feedback: aiAnalysis 
+                transcript: formattedTranscript,
+                student_wpm: technicalMetrics.wpm,
+                score: aiAnalysis?.oratory_expert?.score || 0,
+                passed: aiAnalysis?.recruiter_verdict?.passed || false,
+                feedback: aiAnalysis
             }
         });
 
     } catch (error) {
+        console.error("[Session Controller Error]:", error);
         next(error);
     }
 };
@@ -106,13 +102,6 @@ exports.deleteUserSession = async (req, res, next) => {
         const userId = req.user.uid;
         const { sessionId } = req.params;
         await firebaseService.deleteSession(sessionId, userId);
-        res.json({ success: true, message: 'Session deleted successfully' });
+        res.json({ success: true, message: 'Sesión eliminada correctamente' });
     } catch (error) { next(error); }
-};
-
-exports.getSessionAudio = async (req, res, next) => {
-    res.status(501).json({ 
-        success: false, 
-        error: 'Audio storage functionality is currently disabled.' 
-    });
 };
