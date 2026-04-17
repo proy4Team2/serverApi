@@ -1,3 +1,4 @@
+// src/config/deepgram.js
 require('dotenv').config();
 
 const deepgramConfig = {
@@ -10,7 +11,7 @@ const deepgramConfig = {
         filler_words: true,
         smart_format: false,
         numerals: false,
-        diarize: false
+        multichannel: true // <-- CLAVE: Activa la separación por canales
     },
 
     defaultParamsEN: {
@@ -20,15 +21,15 @@ const deepgramConfig = {
         filler_words: true,
         smart_format: false,
         numerals: false,
-        diarize: false
+        multichannel: true // <-- CLAVE: Activa la separación por canales
     }
 };
 
 const validateConfig = () => {
     if (!deepgramConfig.apiKey) {
-        throw new Error('DEEPGRAM_API_KEY not found in environment variables');
+        throw new Error('DEEPGRAM_API_KEY no encontrada en las variables de entorno');
     }
-    console.log('Deepgram config validated');
+    console.log('Deepgram config validada (Modo Estéreo activado)');
 };
 
 module.exports = {

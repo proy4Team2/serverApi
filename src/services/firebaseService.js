@@ -1,3 +1,4 @@
+// src/services/firebaseService.js
 const { admin } = require('../config/firebase');
 
 class FirebaseService {
@@ -11,119 +12,152 @@ class FirebaseService {
         this.auth = admin.auth();
     }
 
+    // --- AUTENTICACIÓN Y USUARIOS ---
+
     async createUserAuth(email, password, displayName) {
-        if (!this.auth) throw new Error('Firebase Auth not initialized');
+        if (!this.auth) throw new Error('Firebase Auth no inicializado');
         return await this.auth.createUser({ email, password, displayName });
     }
 
     async updateUserAuth(uid, updatedFields) {
-        if (!this.auth) throw new Error('Firebase Auth not initialized');
+        if (!this.auth) throw new Error('Firebase Auth no inicializado');
         return await this.auth.updateUser(uid, updatedFields);
     }
 
+    async loginUser(email, password) {
+        const apiKey = process.env.FIREBASE_WEB_API_KEY;
+        if (!apiKey) throw new Error('FIREBASE_WEB_API_KEY no está configurada en .env');
+
+        const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`;
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: email,
+                password: password,
+                returnSecureToken: true
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) throw new Error(data.error.message || 'Error al iniciar sesión');
+
+        return {
+            uid: data.localId,
+            idToken: data.idToken,
+            email: data.email
+        };
+    }
+
     async saveUserProfile(uid, email, name) {
-        if (!this.db) throw new Error('Firebase not initialized');
+        if (!this.db) throw new Error('Firebase no inicializado');
+        
         await this.db.collection('users').doc(uid).set({
             uid, email, name: name || '',
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            dashboardStats: {
+                totalSessions: 0,
+                averageScore: 0,
+                sessionsPassed: 0,
+                averageWpm: 0,
+                lastSessionDate: null
+            }
         }, { merge: true });
     }
 
     async getUserProfile(uid) {
-        if (!this.db) throw new Error('Firebase not initialized');
+        if (!this.db) throw new Error('Firebase no inicializado');
         const doc = await this.db.collection('users').doc(uid).get();
-        if (!doc.exists) throw new Error('User profile not found');
+        if (!doc.exists) throw new Error('Perfil de usuario no encontrado');
         return doc.data();
     }
 
-    async saveCompleteAnalysis(sessionId, analysisData) {
-        if (!this.db) throw new Error('Firebase not initialized');
+    // --- SESIONES Y PROGRESO ---
+
+    async saveCompleteAnalysis(sessionId, completeData) {
+        if (!this.db) throw new Error('Firebase no inicializado');
+
+        const { userId, aiAnalysis, metrics, createdAt, language } = completeData;
+        const score = aiAnalysis?.oratory_expert?.score || 0;
+        const passed = aiAnalysis?.recruiter_verdict?.passed || false;
+
+        const sessionDocument = {
+            sessionId,
+            userId,
+            createdAt,
+            language,
+            metrics: {
+                ...metrics,
+                score: score,
+                passed: passed
+            },
+            feedback: {
+                summary: aiAnalysis?.oratory_expert?.summary || "",
+                strengths: aiAnalysis?.oratory_expert?.strengths || [],
+                weaknesses: aiAnalysis?.oratory_expert?.weaknesses || [],
+                improvement_plan: aiAnalysis?.improvement_plan || {},
+                decision_rationale: aiAnalysis?.recruiter_verdict?.decision_rationale || ""
+            }
+        };
 
         const batch = this.db.batch();
-        const transcriptionRef = this.db.collection('transcriptions').doc(sessionId);
         
-        const { aiAnalysis, metrics, transcription, ...metaData } = analysisData;
+        // 1. Guardar la sesión plana
+        const sessionRef = this.db.collection('sessions').doc(sessionId);
+        batch.set(sessionRef, sessionDocument);
 
-        batch.set(transcriptionRef, {
-            ...metaData, 
-            transcript: transcription.text,
-            summaryScore: aiAnalysis?.oratory_expert?.score || 0,
-            summaryVerdict: aiAnalysis?.recruiter_verdict?.passed || false,
-            wpm: metrics.wpm,
-            duration: metrics.duration_seconds
-        });
+        // 2. Actualizar las estadísticas del Dashboard del usuario
+        const userRef = this.db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            const stats = userData.dashboardStats || { totalSessions: 0, averageScore: 0, sessionsPassed: 0, averageWpm: 0 };
+            
+            const newTotal = stats.totalSessions + 1;
+            const newAvgScore = ((stats.averageScore * stats.totalSessions) + score) / newTotal;
+            const newAvgWpm = ((stats.averageWpm * stats.totalSessions) + (metrics.wpm || 0)) / newTotal;
+            const newPassed = passed ? stats.sessionsPassed + 1 : stats.sessionsPassed;
 
-        const aiRef = transcriptionRef.collection('analysis').doc('feedback');
-        batch.set(aiRef, aiAnalysis);
-
-        const techRef = transcriptionRef.collection('analysis').doc('technical');
-        batch.set(techRef, {
-            metrics: metrics,
-            words: transcription.words, 
-            contextUsed: analysisData.contextUsed || []
-        });
+            batch.update(userRef, {
+                'dashboardStats.totalSessions': newTotal,
+                'dashboardStats.averageScore': Number(newAvgScore.toFixed(2)),
+                'dashboardStats.averageWpm': Number(newAvgWpm.toFixed(2)),
+                'dashboardStats.sessionsPassed': newPassed,
+                'dashboardStats.lastSessionDate': createdAt
+            });
+        }
 
         await batch.commit();
         return sessionId;
     }
 
-    async getTranscription(sessionId, userId) {
-        if (!this.db) throw new Error('Firebase not initialized');
-        const doc = await this.db.collection('transcriptions').doc(sessionId).get();
-
-        if (!doc.exists) throw new Error('Session not found');
-        const data = doc.data();
-        
-        if (data.userId !== userId) throw new Error('Access denied');
-        return data;
-    }
-
-    async getCompleteSession(sessionId, userId) {
-        if (!this.db) throw new Error('Firebase not initialized');
-        
-        const transcriptionDoc = await this.getTranscription(sessionId, userId);
-
-        const analysisRef = this.db.collection('transcriptions').doc(sessionId).collection('analysis');
-        const [feedbackDoc, technicalDoc] = await Promise.all([
-            analysisRef.doc('feedback').get(),
-            analysisRef.doc('technical').get()
-        ]);
-
-        return {
-            ...transcriptionDoc,
-            feedback: feedbackDoc.exists ? feedbackDoc.data() : null,
-            technical: technicalDoc.exists ? technicalDoc.data() : null
-        };
-    }
-
     async listSessions(userId, limit = 10) {
-        if (!this.db) throw new Error('Firebase not initialized');
-
+        if (!this.db) throw new Error('Firebase no inicializado');
         const query = this.db
-            .collection('transcriptions')
+            .collection('sessions')
             .where('userId', '==', userId)
             .orderBy('createdAt', 'desc')
-            .limit(limit)
-            .select('sessionId', 'language', 'transcript', 'createdAt', 'summaryScore', 'summaryVerdict');
-
+            .limit(limit);
         const snapshot = await query.get();
         return snapshot.docs.map(doc => doc.data());
     }
 
+    async getCompleteSession(sessionId, userId) {
+        if (!this.db) throw new Error('Firebase no inicializado');
+        const doc = await this.db.collection('sessions').doc(sessionId).get();
+        if (!doc.exists) throw new Error('Session not found');
+        const data = doc.data();
+        if (data.userId !== userId) throw new Error('Access denied');
+        return data;
+    }
+
     async deleteSession(sessionId, userId) {
-        if (!this.db) throw new Error('Firebase not initialized');
-        
-        await this.getTranscription(sessionId, userId); 
-
-        const batch = this.db.batch();
-        const transcriptionRef = this.db.collection('transcriptions').doc(sessionId);
-
-        const analysisSnapshot = await transcriptionRef.collection('analysis').get();
-        analysisSnapshot.docs.forEach(doc => batch.delete(doc.ref));
-
-        batch.delete(transcriptionRef);
-        await batch.commit();
-
+        if (!this.db) throw new Error('Firebase no inicializado');
+        await this.getCompleteSession(sessionId, userId); 
+        await this.db.collection('sessions').doc(sessionId).delete();
         return true;
     }
 }
